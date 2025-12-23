@@ -218,8 +218,9 @@ void set_value(GtkRange* range,double value)
 /* Forward declarations */
 static void set_widgets(Mx44patch *tmp_patch,int channel ,int patchNumber);
 
-/* Callback / helper prototypes (declared early because they are referenced via g_signal_connect before their definitions) */
-static int  on_ch_combo(GtkComboBoxText *combo, void *user_data);
+/* Callback / helper prototypes (declared early because they are referenced
+   via g_signal_connect before their definitions) */
+static void on_ch_combo(GtkComboBox *combo, void *user_data);
 static int  on_bank_entry_changed(GtkComboBoxText *combo, void *user_data);
 static int  on_patch_entry_changed(GtkComboBoxText *combo, void *user_data);
 static void on_save_button_toggled(GtkToggleButton *togglebutton, void* user_data);
@@ -254,10 +255,10 @@ void set_widgets(Mx44patch *tmp_patch,int channel ,int patchNumber)
       patch = patchNumber & 0x07;
 
       if (bank_entry)
-        gtk_combo_box_text_set_active(bank_entry, bank);
+        gtk_combo_box_set_active(GTK_COMBO_BOX(bank_entry), bank);
 
       if (patch_entry)
-        gtk_combo_box_text_set_active(patch_entry, patch);
+        gtk_combo_box_set_active(GTK_COMBO_BOX(patch_entry), patch);
 
       if(group)
         {
@@ -411,7 +412,8 @@ static
 GtkWidget *label(GtkWidget *grid,int left,int top,int width,char*text)
 {
   GtkWidget *label = gtk_label_new (text);
-  /* gtk_widget_override_font removed in GTK4; skip explicit font override here. */
+  /* gtk_widget_override_font removed in GTK4; skip explicit font override here.
+     If you need a custom font, apply a GtkCssProvider and style class instead. */
 
   name_n();
   gtk_widget_set_name (label, text);
@@ -748,7 +750,7 @@ GtkWidget* tab_label(GtkWidget *window,char *name)
   return label;
 }
 
-/* ---------- Callbacks (rest) ---------- */
+/* ---------- Callbacks ---------- */
 
 static
 void on_od_clicked (GtkButton *button,
@@ -868,7 +870,7 @@ static
 int on_bank_entry_changed (GtkComboBoxText *combo,
                            void* user_data)
 {
-  bank = gtk_combo_box_get_active(GTK_COMBO_BOX((GTK_COMBO_BOX_TEXT(combo))));
+  bank = gtk_combo_box_get_active(GTK_COMBO_BOX(combo));
   patch_changed();
   return 0;
 }
@@ -877,7 +879,7 @@ static
 int on_patch_entry_changed (GtkComboBoxText *combo,
                             void* user_data)
 {
-  patch = gtk_combo_box_get_active(GTK_COMBO_BOX((GTK_COMBO_BOX_TEXT(combo))));
+  patch = gtk_combo_box_get_active(GTK_COMBO_BOX(combo));
   patch_changed();
   return 0;
 }
@@ -1025,7 +1027,18 @@ void on_monobutton_toggled (GtkToggleButton *togglebutton,
   mx44->monomode[midichannel] = gtk_toggle_button_get_active(togglebutton);
 }
 
-/* Create combo helper and UI builder */
+/* ch combo callback: update midichannel and sync widgets */
+static void
+on_ch_combo(GtkComboBox *combo, void *user_data)
+{
+  midichannel = gtk_combo_box_get_active(GTK_COMBO_BOX(combo));
+  set_widgets(mx44tmpPatch, midichannel, mx44patchNo[midichannel]);
+  newpatch.number = mx44->patchNo[midichannel];
+}
+
+/* ---------- UI construction (GTK4) ---------- */
+
+/* helper to create combo box text */
 static GtkComboBoxText* create_combo_text_with_items(const char **items, int n)
 {
   GtkComboBoxText *combo = GTK_COMBO_BOX_TEXT(gtk_combo_box_text_new());
@@ -1063,7 +1076,7 @@ GtkWindow* create_window (gboolean has_rc)
   gtk_grid_attach (GTK_GRID (basetable),
           patch_table, 0,1, 3,1);
 
-  /* patch group and controls (abbreviated, following prior layout) */
+  /* patch group radio buttons (simple toggle approach) */
   patch_group_1 = gtk_toggle_button_new();
   g_object_ref (patch_group_1);
   g_object_set_data_full (G_OBJECT (window1), "patch_group_1", patch_group_1,
@@ -1080,6 +1093,7 @@ GtkWindow* create_window (gboolean has_rc)
   gtk_grid_attach (GTK_GRID (patch_table), patch_group_2, 3,0, 2,1);
   gtk_widget_set_tooltip_text (patch_group_2, "patch group 2");
 
+  /* bank combo (A..H) */
   bank_entry = create_combo_text_with_items((const char*[]){"A","B","C","D","E","F","G","H"}, 8);
   g_object_ref(bank_entry);
   g_object_set_data_full (G_OBJECT (window1), "bank_combo", bank_entry,
@@ -1088,6 +1102,7 @@ GtkWindow* create_window (gboolean has_rc)
   gtk_widget_set_visible(GTK_WIDGET(bank_entry), TRUE);
   gtk_grid_attach (GTK_GRID (patch_table), GTK_WIDGET(bank_entry), 5,0, 4,1);
 
+  /* patch combo (1..8) */
   patch_entry = create_combo_text_with_items((const char*[]){"1","2","3","4","5","6","7","8"}, 8);
   g_object_ref(patch_entry);
   g_object_set_data_full (G_OBJECT (window1), "patch_combo", patch_entry,
@@ -1096,6 +1111,7 @@ GtkWindow* create_window (gboolean has_rc)
   gtk_widget_set_visible(GTK_WIDGET(patch_entry), TRUE);
   gtk_grid_attach (GTK_GRID (patch_table), GTK_WIDGET(patch_entry), 9,0, 4,1);
 
+  /* patch name entry */
   patchname = gtk_entry_new();
   gtk_entry_set_max_length(GTK_ENTRY(patchname),31);
   g_object_ref (patchname);
@@ -1104,6 +1120,7 @@ GtkWindow* create_window (gboolean has_rc)
   gtk_widget_set_visible (patchname, TRUE);
   gtk_grid_attach (GTK_GRID (patch_table), patchname, 13,0, 14,1);
 
+  /* save toggle button */
   GtkWidget *save_button = gtk_toggle_button_new_with_label ("SAVE");
   g_object_ref (save_button);
   g_object_set_data_full (G_OBJECT (window1), "save_button", save_button,
@@ -1112,6 +1129,7 @@ GtkWindow* create_window (gboolean has_rc)
   gtk_grid_attach (GTK_GRID (patch_table), save_button, 27,0, 4,1);
   gtk_widget_set_tooltip_text (save_button, "select patch to save in, then release button");
 
+  /* esc button */
   GtkWidget *esc_save_button = gtk_button_new_with_label ("Esc");
   g_object_ref (esc_save_button);
   g_object_set_data_full (G_OBJECT (window1), "esc_save_button", esc_save_button,
@@ -1120,6 +1138,7 @@ GtkWindow* create_window (gboolean has_rc)
   gtk_grid_attach (GTK_GRID (patch_table), esc_save_button, 31,0, 3,1);
   gtk_widget_set_tooltip_text (esc_save_button, "cancel save procedure");
 
+  /* common spin/labels */
   ed.common_oplabel = tab_label(ed.window, "Mx44");
   gtk_label_set_justify (GTK_LABEL (ed.common_oplabel), GTK_JUSTIFY_LEFT);
   gtk_widget_set_size_request (ed.common_oplabel ,20, -1);
@@ -1137,6 +1156,7 @@ GtkWindow* create_window (gboolean has_rc)
   gtk_widget_set_size_request (ed.common_spinlabel ,60, -1);
   gtk_grid_attach (GTK_GRID (patch_table), ed.common_spinlabel, 44,0, 15,1);
 
+  /* monobutton */
   ed.monobutton = gtk_toggle_button_new_with_label ("M");
   g_object_ref (ed.monobutton);
   g_object_set_data_full (G_OBJECT (window1), "monobutton", ed.monobutton,
@@ -1144,6 +1164,7 @@ GtkWindow* create_window (gboolean has_rc)
   gtk_widget_set_visible(ed.monobutton, TRUE);
   gtk_grid_attach (GTK_GRID (patch_table), ed.monobutton, 59,0, 2,1);
 
+  /* channel combo (Ch 1 .. Ch16) */
   GtkComboBoxText *ch_combo = create_combo_text_with_items((const char*[]){
       "Ch 1","Ch 2","Ch 3","Ch 4","Ch 5","Ch 6","Ch 7","Ch 8",
       "Ch 9","Ch10","Ch11","Ch12","Ch13","Ch14","Ch15","Ch16"}, 16);
@@ -1152,8 +1173,10 @@ GtkWindow* create_window (gboolean has_rc)
               (GDestroyNotify) g_object_unref);
   gtk_widget_set_visible(GTK_WIDGET(ch_combo), TRUE);
   gtk_grid_attach (GTK_GRID (patch_table), GTK_WIDGET(ch_combo), 61,0, 4,1);
+  /* ch_combo changed handler expects a GtkComboBox* callback */
   g_signal_connect (ch_combo, "changed", G_CALLBACK (on_ch_combo), NULL);
 
+  /* connect signals for bank/patch/save/esc/mono buttons */
   g_signal_connect (bank_entry, "changed", G_CALLBACK (on_bank_entry_changed), NULL);
   g_signal_connect (patch_entry, "changed", G_CALLBACK (on_patch_entry_changed), NULL);
   g_signal_connect (save_button, "toggled", G_CALLBACK (on_save_button_toggled), NULL);
@@ -1162,8 +1185,9 @@ GtkWindow* create_window (gboolean has_rc)
   g_signal_connect (patch_group_1, "pressed", G_CALLBACK (on_patch_group_1_clicked), NULL);
   g_signal_connect (patch_group_2, "pressed", G_CALLBACK (on_patch_group_2_clicked), NULL);
 
+  /* Scale and fx area */
   frame = gtk_frame_new(NULL);
-  gtk_frame_set_shadow_type(GTK_FRAME(frame), GTK_SHADOW_NONE);
+  /* gtk_frame_set_shadow_type removed in GTK4; skip shadow setup */
   gtk_widget_set_visible(frame, TRUE);
 
   scale_table = gtk_grid_new();
@@ -1172,15 +1196,16 @@ GtkWindow* create_window (gboolean has_rc)
   g_object_set_data_full (G_OBJECT (window1), "scale_table", scale_table,
               (GDestroyNotify) g_object_unref);
 
-  gtk_container_set_border_width(GTK_CONTAINER(frame), 0);
-  gtk_container_add(GTK_CONTAINER(frame), scale_table);
+  /* gtk_container_set_border_width / gtk_container_add removed in GTK4.
+     Use gtk_frame_set_child to place the grid inside the frame */
+  gtk_frame_set_child(GTK_FRAME(frame), scale_table);
   gtk_widget_set_visible(scale_table, TRUE);
 
   gtk_grid_attach (GTK_GRID (basetable),
           frame, 0,3, 2,1);
 
+  /* FX side */
   frame = gtk_frame_new(NULL);
-  gtk_frame_set_shadow_type(GTK_FRAME(frame), GTK_SHADOW_NONE);
   gtk_widget_set_visible(frame, TRUE);
 
   GtkWidget *fx_table = gtk_grid_new();
@@ -1188,10 +1213,11 @@ GtkWindow* create_window (gboolean has_rc)
   g_object_set_data_full (G_OBJECT (window1), "fx_table", fx_table,
               (GDestroyNotify) g_object_unref);
   gtk_widget_set_visible(fx_table, TRUE);
-  gtk_container_add(GTK_CONTAINER(frame), fx_table);
+  gtk_frame_set_child(GTK_FRAME(frame), fx_table);
   gtk_grid_attach (GTK_GRID (basetable),
           frame, 2,0, 1,3);
 
+  /* LFO controls */
   ed.lfo[0] = scale(fx_table, 1,12,1,4, 0,100,-1,LFO,0,"  LFO rate 1");
   ed.lfo[1] = scale(fx_table, 2,12,1,4, 0,100,-1,LFO,1,"  LFO rate 2");
   ed.lfo[2] = scale(fx_table, 4,10,1,4, 0,100,-1,LFO,2,"  LFO amount 1");
@@ -1202,6 +1228,7 @@ GtkWindow* create_window (gboolean has_rc)
   label(fx_table,1,10,4," Sync");
   label(fx_table,1,11,4," Wheel");
 
+  /* lfo buttons */
   GtkWidget *btn = gtk_check_button_new();
   g_object_ref(btn);
   g_object_set_data_full (G_OBJECT (window1), "loopbutton", btn,
@@ -1222,11 +1249,13 @@ GtkWindow* create_window (gboolean has_rc)
   gtk_widget_set_size_request (btn, CSZ, CSZ);
   ed.lfo_button[1] = btn;
 
+  /* temperament & shruti */
   label(scale_table,0,0,1," Temperament ");
   int x = 1;
   for (int t=0;t<4;++t)
     {
-      ed.temperament[t] = gtk_radio_button_new(NULL);
+      /* use toggle buttons instead of radio buttons for GTK4 compatibility */
+      ed.temperament[t] = gtk_toggle_button_new();
       gtk_widget_set_tooltip_text(ed.temperament[t], temp_tips[t]);
       gtk_widget_set_visible(ed.temperament[t], TRUE);
       gtk_grid_attach (GTK_GRID (scale_table), ed.temperament[t], x,0, 1,1);
@@ -1270,6 +1299,7 @@ GtkWindow* create_window (gboolean has_rc)
       ++x;
     }
 
+  /* Add basetable to the window and show */
   gtk_window_set_child(GTK_WINDOW(ed.window), basetable);
   gtk_widget_set_visible(ed.window, TRUE);
 
@@ -1280,11 +1310,13 @@ GtkWindow* create_window (gboolean has_rc)
 static void
 app_activate(GApplication *app, gpointer user_data)
 {
+    /* create UI */
     create_window(TRUE);
 
     if (GTK_IS_WINDOW(ed.window))
         gtk_window_set_application(GTK_WINDOW(ed.window), GTK_APPLICATION(app));
 
+    /* initial widget sync */
     set_widgets(mx44tmpPatch,0,mx44patchNo[0]);
 
     int i,x;
@@ -1313,6 +1345,7 @@ int main_interface (int argc, char *argv[])
 
   memset(&mx44op_buf, 0, sizeof(mx44op_copypaste_buf));
 
+  /* create GtkApplication and run it; UI built in activate */
   GtkApplication *app;
   int status;
 
