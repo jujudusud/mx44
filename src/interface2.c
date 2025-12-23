@@ -399,10 +399,7 @@ static
 GtkWidget *label(GtkWidget *grid,int left,int top,int width,char*text)
 {
   GtkWidget *label = gtk_label_new (text);
-  PangoFontDescription *fd = pango_font_description_from_string (label_font);
-  gtk_widget_override_font(label, fd);
-  pango_font_description_free(fd);
-
+  
   name_n();
   gtk_widget_set_name (label, text);
   g_object_ref (label);
