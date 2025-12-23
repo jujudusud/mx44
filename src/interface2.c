@@ -218,6 +218,18 @@ void set_value(GtkRange* range,double value)
 /* Forward declarations */
 static void set_widgets(Mx44patch *tmp_patch,int channel ,int patchNumber);
 
+/* Callback / helper prototypes (declared early because they are referenced via g_signal_connect before their definitions) */
+static int  on_ch_combo(GtkComboBoxText *combo, void *user_data);
+static int  on_bank_entry_changed(GtkComboBoxText *combo, void *user_data);
+static int  on_patch_entry_changed(GtkComboBoxText *combo, void *user_data);
+static void on_save_button_toggled(GtkToggleButton *togglebutton, void* user_data);
+static void on_esc_save_button_pressed(GtkButton *button, void* user_data);
+static void on_monobutton_toggled(GtkToggleButton *togglebutton, void* user_data);
+static void on_patch_group_1_clicked(GtkButton *button, void* user_data);
+static void on_patch_group_2_clicked(GtkButton *button, void* user_data);
+static void on_lfo_button_clicked(GtkToggleButton *button, void* user_data);
+static void app_activate(GApplication *app, gpointer user_data);
+
 /* Update UI widgets to reflect a patch */
 static
 void set_widgets(Mx44patch *tmp_patch,int channel ,int patchNumber)
