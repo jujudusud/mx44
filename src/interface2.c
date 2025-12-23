@@ -242,10 +242,10 @@ void set_widgets(Mx44patch *tmp_patch,int channel ,int patchNumber)
       patch = patchNumber & 0x07;
 
       if (bank_entry)
-        gtk_combo_box_set_active(GTK_COMBO_BOX(bank_entry), bank);
+        gtk_combo_box_text_set_active(bank_entry, bank);
 
       if (patch_entry)
-        gtk_combo_box_set_active(GTK_COMBO_BOX(patch_entry), patch);
+        gtk_combo_box_text_set_active(patch_entry, patch);
 
       if(group)
         {
@@ -260,7 +260,7 @@ void set_widgets(Mx44patch *tmp_patch,int channel ,int patchNumber)
     }
 
    if (patchname)
-     gtk_entry_set_text (GTK_ENTRY (patchname), tmp_patch->name);
+     g_object_set(patchname, "text", tmp_patch->name, NULL);
 
    for(op = 0; op < 4; ++op)
     {
@@ -399,7 +399,8 @@ static
 GtkWidget *label(GtkWidget *grid,int left,int top,int width,char*text)
 {
   GtkWidget *label = gtk_label_new (text);
-  
+  /* gtk_widget_override_font removed in GTK4; skip explicit font override here. */
+
   name_n();
   gtk_widget_set_name (label, text);
   g_object_ref (label);
@@ -735,7 +736,7 @@ GtkWidget* tab_label(GtkWidget *window,char *name)
   return label;
 }
 
-/* ---------- Callbacks ---------- */
+/* ---------- Callbacks (rest) ---------- */
 
 static
 void on_od_clicked (GtkButton *button,
@@ -852,19 +853,21 @@ void on_patch_group_2_clicked (GtkButton *button,
 }
 
 static
-void on_bank_entry_changed (GtkComboBox *combo,
+int on_bank_entry_changed (GtkComboBoxText *combo,
                            void* user_data)
 {
-  bank = gtk_combo_box_get_active(combo);
+  bank = gtk_combo_box_get_active(GTK_COMBO_BOX((GTK_COMBO_BOX_TEXT(combo))));
   patch_changed();
+  return 0;
 }
 
 static
-void on_patch_entry_changed (GtkComboBox *combo,
+int on_patch_entry_changed (GtkComboBoxText *combo,
                             void* user_data)
 {
-  patch = gtk_combo_box_get_active(combo);
+  patch = gtk_combo_box_get_active(GTK_COMBO_BOX((GTK_COMBO_BOX_TEXT(combo))));
   patch_changed();
+  return 0;
 }
 
 static
@@ -879,9 +882,19 @@ void on_save_button_toggled (GtkToggleButton *togglebutton,
       if(savebutton)
         {
           printf("patch: %i channel %i\n",mx44patchNo [midichannel] ,midichannel);
-          strcpy( mx44tmpPatch[midichannel].name,gtk_entry_get_text(GTK_ENTRY(patchname)));
-          mx44patch[(unsigned)mx44patchNo[midichannel]]
-            = mx44tmpPatch[midichannel];
+          /* Safely read the entry text via g_object_get and copy into fixed buffer */
+          {
+            char *txt = NULL;
+            g_object_get(patchname, "text", &txt, NULL);
+            if (txt) {
+              strncpy(mx44tmpPatch[midichannel].name, txt, sizeof(mx44tmpPatch[midichannel].name)-1);
+              mx44tmpPatch[midichannel].name[sizeof(mx44tmpPatch[midichannel].name)-1] = '\0';
+              g_free(txt);
+            } else {
+              mx44tmpPatch[midichannel].name[0] = '\0';
+            }
+          }
+          mx44patch[(unsigned)mx44patchNo[midichannel]] = mx44tmpPatch[midichannel];
         }
 
       saving = FALSE;
@@ -1000,15 +1013,302 @@ void on_monobutton_toggled (GtkToggleButton *togglebutton,
   mx44->monomode[midichannel] = gtk_toggle_button_get_active(togglebutton);
 }
 
-static
-void on_ch_combo_changed( GtkComboBox *combo, void* user_data)
+/* Create combo helper and UI builder */
+static GtkComboBoxText* create_combo_text_with_items(const char **items, int n)
 {
-  midichannel = gtk_combo_box_get_active(combo);
-  set_widgets(mx44tmpPatch,midichannel,mx44patchNo[midichannel]);
-  newpatch.number = mx44->patchNo[midichannel];
+  GtkComboBoxText *combo = GTK_COMBO_BOX_TEXT(gtk_combo_box_text_new());
+  for (int i=0;i<n;++i)
+    gtk_combo_box_text_append_text(combo, items[i]);
+  gtk_combo_box_set_active(GTK_COMBO_BOX(combo), 0);
+  return combo;
 }
 
-/* ---------- UI construction (GTK4) ---------- */
+/* Create the main window and widgets. Returns the window. */
+static
+GtkWindow* create_window (gboolean has_rc)
+{
+  GtkWidget  *frame,*basetable = NULL;
 
-/* helper to create combo box text */
-static GtkComboBoxText* create_combo_text_with_items
+  ed.window = gtk_window_new();
+  gtk_window_set_title(GTK_WINDOW(ed.window), "Mx44.2");
+
+  window1=ed.window;
+  char *name = name_n();
+  gtk_widget_set_name (ed.window, name);
+  g_object_set_data (G_OBJECT (ed.window), name, ed.window);
+
+  basetable = gtk_grid_new();
+  g_object_ref (basetable);
+  gtk_widget_set_visible(basetable, TRUE);
+
+  /* patch table area using a grid */
+  GtkWidget *patch_table = gtk_grid_new();
+  g_object_ref (patch_table);
+  g_object_set_data_full (G_OBJECT (window1), "patch_table", patch_table,
+              (GDestroyNotify) g_object_unref);
+  gtk_widget_set_visible (patch_table, TRUE);
+
+  gtk_grid_attach (GTK_GRID (basetable),
+          patch_table, 0,1, 3,1);
+
+  /* patch group and controls (abbreviated, following prior layout) */
+  patch_group_1 = gtk_toggle_button_new();
+  g_object_ref (patch_group_1);
+  g_object_set_data_full (G_OBJECT (window1), "patch_group_1", patch_group_1,
+              (GDestroyNotify) g_object_unref);
+  gtk_widget_set_visible (patch_group_1, TRUE);
+  gtk_grid_attach (GTK_GRID (patch_table), patch_group_1, 1,0, 2,1);
+  gtk_widget_set_tooltip_text (patch_group_1, "patch group 1");
+
+  patch_group_2 = gtk_toggle_button_new();
+  g_object_ref (patch_group_2);
+  g_object_set_data_full (G_OBJECT (window1), "patch_group_2", patch_group_2,
+              (GDestroyNotify) g_object_unref);
+  gtk_widget_set_visible (patch_group_2, TRUE);
+  gtk_grid_attach (GTK_GRID (patch_table), patch_group_2, 3,0, 2,1);
+  gtk_widget_set_tooltip_text (patch_group_2, "patch group 2");
+
+  bank_entry = create_combo_text_with_items((const char*[]){"A","B","C","D","E","F","G","H"}, 8);
+  g_object_ref(bank_entry);
+  g_object_set_data_full (G_OBJECT (window1), "bank_combo", bank_entry,
+              (GDestroyNotify) g_object_unref);
+  gtk_widget_set_tooltip_text (GTK_WIDGET(bank_entry), "bank selection");
+  gtk_widget_set_visible(GTK_WIDGET(bank_entry), TRUE);
+  gtk_grid_attach (GTK_GRID (patch_table), GTK_WIDGET(bank_entry), 5,0, 4,1);
+
+  patch_entry = create_combo_text_with_items((const char*[]){"1","2","3","4","5","6","7","8"}, 8);
+  g_object_ref(patch_entry);
+  g_object_set_data_full (G_OBJECT (window1), "patch_combo", patch_entry,
+              (GDestroyNotify) g_object_unref);
+  gtk_widget_set_tooltip_text(GTK_WIDGET(patch_entry), "patch selection");
+  gtk_widget_set_visible(GTK_WIDGET(patch_entry), TRUE);
+  gtk_grid_attach (GTK_GRID (patch_table), GTK_WIDGET(patch_entry), 9,0, 4,1);
+
+  patchname = gtk_entry_new();
+  gtk_entry_set_max_length(GTK_ENTRY(patchname),31);
+  g_object_ref (patchname);
+  g_object_set_data_full (G_OBJECT (window1), "patchname", patchname,
+              (GDestroyNotify) g_object_unref);
+  gtk_widget_set_visible (patchname, TRUE);
+  gtk_grid_attach (GTK_GRID (patch_table), patchname, 13,0, 14,1);
+
+  GtkWidget *save_button = gtk_toggle_button_new_with_label ("SAVE");
+  g_object_ref (save_button);
+  g_object_set_data_full (G_OBJECT (window1), "save_button", save_button,
+              (GDestroyNotify) g_object_unref);
+  gtk_widget_set_visible (save_button, TRUE);
+  gtk_grid_attach (GTK_GRID (patch_table), save_button, 27,0, 4,1);
+  gtk_widget_set_tooltip_text (save_button, "select patch to save in, then release button");
+
+  GtkWidget *esc_save_button = gtk_button_new_with_label ("Esc");
+  g_object_ref (esc_save_button);
+  g_object_set_data_full (G_OBJECT (window1), "esc_save_button", esc_save_button,
+              (GDestroyNotify) g_object_unref);
+  gtk_widget_set_visible (esc_save_button, TRUE);
+  gtk_grid_attach (GTK_GRID (patch_table), esc_save_button, 31,0, 3,1);
+  gtk_widget_set_tooltip_text (esc_save_button, "cancel save procedure");
+
+  ed.common_oplabel = tab_label(ed.window, "Mx44");
+  gtk_label_set_justify (GTK_LABEL (ed.common_oplabel), GTK_JUSTIFY_LEFT);
+  gtk_widget_set_size_request (ed.common_oplabel ,20, -1);
+  gtk_grid_attach (GTK_GRID (patch_table), ed.common_oplabel, 36,0, 3,1);
+
+  ed.common_spinbutton = gtk_spin_button_new(NULL, 1.0, 2);
+  g_object_ref(ed.common_spinbutton);
+  gtk_spin_button_set_numeric(GTK_SPIN_BUTTON(ed.common_spinbutton), TRUE);
+  gtk_widget_set_size_request (ed.common_spinbutton ,50, -1);
+  gtk_widget_set_visible (ed.common_spinbutton, TRUE);
+  gtk_grid_attach (GTK_GRID (patch_table), ed.common_spinbutton, 39,0, 5,1);
+
+  ed.common_spinlabel = tab_label(ed.window, "  (C) Jens M Andreasen, 2009");
+  gtk_label_set_justify (GTK_LABEL (ed.common_spinlabel), GTK_JUSTIFY_LEFT);
+  gtk_widget_set_size_request (ed.common_spinlabel ,60, -1);
+  gtk_grid_attach (GTK_GRID (patch_table), ed.common_spinlabel, 44,0, 15,1);
+
+  ed.monobutton = gtk_toggle_button_new_with_label ("M");
+  g_object_ref (ed.monobutton);
+  g_object_set_data_full (G_OBJECT (window1), "monobutton", ed.monobutton,
+              (GDestroyNotify) g_object_unref);
+  gtk_widget_set_visible(ed.monobutton, TRUE);
+  gtk_grid_attach (GTK_GRID (patch_table), ed.monobutton, 59,0, 2,1);
+
+  GtkComboBoxText *ch_combo = create_combo_text_with_items((const char*[]){
+      "Ch 1","Ch 2","Ch 3","Ch 4","Ch 5","Ch 6","Ch 7","Ch 8",
+      "Ch 9","Ch10","Ch11","Ch12","Ch13","Ch14","Ch15","Ch16"}, 16);
+  g_object_ref (ch_combo);
+  g_object_set_data_full (G_OBJECT (window1), "ch_combo", ch_combo,
+              (GDestroyNotify) g_object_unref);
+  gtk_widget_set_visible(GTK_WIDGET(ch_combo), TRUE);
+  gtk_grid_attach (GTK_GRID (patch_table), GTK_WIDGET(ch_combo), 61,0, 4,1);
+  g_signal_connect (ch_combo, "changed", G_CALLBACK (on_ch_combo), NULL);
+
+  g_signal_connect (bank_entry, "changed", G_CALLBACK (on_bank_entry_changed), NULL);
+  g_signal_connect (patch_entry, "changed", G_CALLBACK (on_patch_entry_changed), NULL);
+  g_signal_connect (save_button, "toggled", G_CALLBACK (on_save_button_toggled), NULL);
+  g_signal_connect (esc_save_button, "clicked", G_CALLBACK (on_esc_save_button_pressed), NULL);
+  g_signal_connect (ed.monobutton, "toggled", G_CALLBACK (on_monobutton_toggled), NULL);
+  g_signal_connect (patch_group_1, "pressed", G_CALLBACK (on_patch_group_1_clicked), NULL);
+  g_signal_connect (patch_group_2, "pressed", G_CALLBACK (on_patch_group_2_clicked), NULL);
+
+  frame = gtk_frame_new(NULL);
+  gtk_frame_set_shadow_type(GTK_FRAME(frame), GTK_SHADOW_NONE);
+  gtk_widget_set_visible(frame, TRUE);
+
+  scale_table = gtk_grid_new();
+  gtk_widget_set_visible(scale_table, TRUE);
+  g_object_ref(scale_table);
+  g_object_set_data_full (G_OBJECT (window1), "scale_table", scale_table,
+              (GDestroyNotify) g_object_unref);
+
+  gtk_container_set_border_width(GTK_CONTAINER(frame), 0);
+  gtk_container_add(GTK_CONTAINER(frame), scale_table);
+  gtk_widget_set_visible(scale_table, TRUE);
+
+  gtk_grid_attach (GTK_GRID (basetable),
+          frame, 0,3, 2,1);
+
+  frame = gtk_frame_new(NULL);
+  gtk_frame_set_shadow_type(GTK_FRAME(frame), GTK_SHADOW_NONE);
+  gtk_widget_set_visible(frame, TRUE);
+
+  GtkWidget *fx_table = gtk_grid_new();
+  g_object_ref (fx_table);
+  g_object_set_data_full (G_OBJECT (window1), "fx_table", fx_table,
+              (GDestroyNotify) g_object_unref);
+  gtk_widget_set_visible(fx_table, TRUE);
+  gtk_container_add(GTK_CONTAINER(frame), fx_table);
+  gtk_grid_attach (GTK_GRID (basetable),
+          frame, 2,0, 1,3);
+
+  ed.lfo[0] = scale(fx_table, 1,12,1,4, 0,100,-1,LFO,0,"  LFO rate 1");
+  ed.lfo[1] = scale(fx_table, 2,12,1,4, 0,100,-1,LFO,1,"  LFO rate 2");
+  ed.lfo[2] = scale(fx_table, 4,10,1,4, 0,100,-1,LFO,2,"  LFO amount 1");
+  ed.lfo[3] = scale(fx_table, 5,9,1,4, 0,100,-1,LFO,3,"  LFO amount 2");
+  ed.lfo[4] = scale(fx_table, 0,9,5,1, 0,100,-1,LFO,4,"  LFO time 1");
+  ed.lfo[5] = scale(fx_table, 1,8,5,1, 0,100,-1,LFO,5,"  LFO time 2");
+
+  label(fx_table,1,10,4," Sync");
+  label(fx_table,1,11,4," Wheel");
+
+  GtkWidget *btn = gtk_check_button_new();
+  g_object_ref(btn);
+  g_object_set_data_full (G_OBJECT (window1), "loopbutton", btn,
+              (GDestroyNotify) g_object_unref);
+  g_signal_connect (btn, "clicked", G_CALLBACK (on_lfo_button_clicked), NULL);
+  gtk_widget_set_visible (btn, TRUE);
+  gtk_grid_attach (GTK_GRID (fx_table), btn, 0,10, 1,1);
+  gtk_widget_set_size_request (btn, CSZ, CSZ);
+  ed.lfo_button[0] = btn;
+
+  btn = gtk_check_button_new();
+  g_object_ref(btn);
+  g_object_set_data_full (G_OBJECT (window1), "touchbutton", btn,
+              (GDestroyNotify) g_object_unref);
+  g_signal_connect (btn, "clicked", G_CALLBACK (on_lfo_button_clicked), GINT_TO_POINTER(1));
+  gtk_widget_set_visible (btn, TRUE);
+  gtk_grid_attach (GTK_GRID (fx_table), btn, 0,11, 1,1);
+  gtk_widget_set_size_request (btn, CSZ, CSZ);
+  ed.lfo_button[1] = btn;
+
+  label(scale_table,0,0,1," Temperament ");
+  int x = 1;
+  for (int t=0;t<4;++t)
+    {
+      ed.temperament[t] = gtk_radio_button_new(NULL);
+      gtk_widget_set_tooltip_text(ed.temperament[t], temp_tips[t]);
+      gtk_widget_set_visible(ed.temperament[t], TRUE);
+      gtk_grid_attach (GTK_GRID (scale_table), ed.temperament[t], x,0, 1,1);
+      gtk_widget_set_size_request (ed.temperament[t], CSZ, CSZ);
+      g_signal_connect (ed.temperament[t], "clicked", G_CALLBACK (on_temperament_clicked), GINT_TO_POINTER(t));
+      if (t == mx44->temperament)
+        gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(ed.temperament[t]), TRUE);
+      ++x;
+    }
+  x++;
+  for (int t=0; t<10; ++t)
+    {
+      GtkWidget *gw;
+      if (t == 0)
+        {
+          gw = label(scale_table, x, 0, 1, ":  D ");
+          gtk_widget_set_tooltip_text (gw," tonica (SA)");
+          gtk_widget_set_sensitive (gw, TRUE);
+          ++x;
+        }
+      else if (t == 6)
+        {
+          gw = label(scale_table, x, 0, 1, " A ");
+          gtk_widget_set_tooltip_text (gw," perfect fifth (PA)");
+          gtk_widget_set_sensitive (gw, TRUE);
+          ++x;
+        }
+
+      ed.shruti[t] = gtk_check_button_new();
+      gtk_widget_set_visible(ed.shruti[t], TRUE);
+      g_signal_connect (ed.shruti[t], "clicked", G_CALLBACK (on_shruti_button_clicked), GINT_TO_POINTER(t));
+      if(t < 6)
+        gtk_grid_attach (GTK_GRID (scale_table), ed.shruti[t], x, 0, 1, 1);
+      else
+        {
+          gtk_grid_attach (GTK_GRID (scale_table), ed.shruti[t], x, 0, 2, 1);
+          ++x;
+        }
+      gtk_widget_set_size_request (ed.shruti[t], CSZ, CSZ);
+      gtk_widget_set_tooltip_text (ed.shruti[t], shruti_tips[t]);
+      ++x;
+    }
+
+  gtk_window_set_child(GTK_WINDOW(ed.window), basetable);
+  gtk_widget_set_visible(ed.window, TRUE);
+
+  return GTK_WINDOW(ed.window);
+}
+
+/* Application activate handler: build UI and present window */
+static void
+app_activate(GApplication *app, gpointer user_data)
+{
+    create_window(TRUE);
+
+    if (GTK_IS_WINDOW(ed.window))
+        gtk_window_set_application(GTK_WINDOW(ed.window), GTK_APPLICATION(app));
+
+    set_widgets(mx44tmpPatch,0,mx44patchNo[0]);
+
+    int i,x;
+    for(i = 0, x=0; i < 12; ++i)
+      {
+        if(i == 0|| i == 7)
+          continue;
+        if(mx44->shruti[i])
+          gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (ed.shruti[x]), TRUE);
+        ++x;
+      }
+
+    g_timeout_add (50, check_patch, NULL);
+
+    if (GTK_IS_WINDOW(ed.window))
+        gtk_window_present(GTK_WINDOW(ed.window));
+}
+
+/* ---------- Main entry used by the rest of the program ---------- */
+
+int main_interface (int argc, char *argv[])
+{
+  mx44patch =   mx44->patch;
+  mx44patchNo = mx44->patchNo;
+  mx44tmpPatch = newpatch.tmp = mx44->tmpPatch;
+
+  memset(&mx44op_buf, 0, sizeof(mx44op_copypaste_buf));
+
+  GtkApplication *app;
+  int status;
+
+  app = gtk_application_new("org.mx44.app", G_APPLICATION_FLAGS_NONE);
+  g_signal_connect(app, "activate", G_CALLBACK(app_activate), NULL);
+
+  status = g_application_run(G_APPLICATION(app), argc, argv);
+  g_object_unref(app);
+
+  return status;
+}
