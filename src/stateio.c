@@ -28,12 +28,6 @@
 #include <string.h>
 #include <errno.h>
 
-/* DATADIR normally comes from the build system. Provide a sensible */
-/* fallback so the code compiles when DATADIR wasn't defined. */
-#ifndef DATADIR
-#define DATADIR "/usr/share"
-#endif
-
 static char* userpatch_name = 0;
 
 static int patch_fd = -1;
